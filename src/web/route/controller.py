@@ -56,7 +56,7 @@ def create_game_controller(service: GameServiceInterface) -> Flask:
         # Мы не сохраняем старое поле здесь — это делает сервис внутри
         # Для упрощения валидируем только структуру (в реальном проекте нужно хранить историю)
         if not service.validate_board(domain_game, domain_game.board):
-            abort(400, description="Board validation failed: previous moves were modified")
+            abort(400, description="Board validation failed: previous moves were modified")   
         
         # Получаем следующий ход от алгоритма (Минимакс или заглушка)
         next_move: Tuple[int, int] = service.get_next_move(domain_game)

@@ -1,7 +1,8 @@
 # Импортируем классы из слоёв
-from domain.service.impl import GameServiceImpl
 from datasource.storage import GameStorage
 from datasource.repository.game_repo import GameRepository
+# <-- ИСПРАВЛЕНО: берём реализацию сервиса с репозиторием из datasource
+from datasource.service.game_service_impl import GameServiceImplWithRepo
 from web.route.controller import create_game_controller
 
 # Точка входа: выполняется, когда запускаешь `python main.py`
@@ -10,9 +11,9 @@ if __name__ == "__main__":
     storage = GameStorage()
     # 2. Создаём репозиторий, передаём хранилище (внедрение зависимостей)
     repo = GameRepository(storage)
-    # 3. Создаём сервис, передаём репозиторий
-    service = GameServiceImpl(repo)
-    # 4. Создаём Flask-приложение, передаём сервис
+    # <-- ИСПРАВЛЕНО: используем класс, который умеет принимать репозиторий
+    service = GameServiceImplWithRepo(repo)
+    # 3. Создаём Flask-приложение, передаём сервис
     app = create_game_controller(service)
     
     # Запускаем сервер на порту 5000

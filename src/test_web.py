@@ -35,7 +35,8 @@ def test_web_checklist():
     
     # 4. Контроллер Flask
     from flask import Flask
-    from domain.service.impl import GameServiceImpl
+    # <-- ИСПРАВЛЕНО: импортируем версию сервиса, которая принимает репозиторий
+    from datasource.service.game_service_impl import GameServiceImplWithRepo
     from datasource.storage import GameStorage
     from datasource.repository.game_repo import GameRepository
     from web.route.controller import create_game_controller
@@ -43,7 +44,8 @@ def test_web_checklist():
     # Собираем зависимости
     storage = GameStorage()
     repo = GameRepository(storage)
-    service = GameServiceImpl(repo)
+    # <-- ИСПРАВЛЕНО: создаём сервис, передавая готовый репозиторий
+    service = GameServiceImplWithRepo(repo)
     app = create_game_controller(service)
     
     assert isinstance(app, Flask)
@@ -51,7 +53,6 @@ def test_web_checklist():
     
     # 5. Тест POST-запроса (через тестовый клиент Flask)
     with app.test_client() as client:
-        # Готовим валидный запрос
         test_input = {
             "id": str(domain_game.id),
             "board": {
@@ -64,14 +65,11 @@ def test_web_checklist():
             data=json.dumps(test_input),
             content_type='application/json'
         )
-        # Проверяем статус ответа
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        # Проверяем, что ответ — JSON
         data = response.get_json()
         assert 'id' in data and 'board' in data
         print("✅ POST /game/{UUID} принимает валидный запрос и возвращает обновлённую игру.")
         
-        # Тест некорректного запроса (пустое тело)
         bad_response = client.post(
             f'/game/{domain_game.id}',
             data='not-json',
@@ -80,12 +78,11 @@ def test_web_checklist():
         assert bad_response.status_code == 400
         print("✅ Некорректный запрос возвращает ошибку 400 с описанием.")
     
-    # 6. Поддержка нескольких игр (проверяем, что хранилище не глобальное)
-    from datasource.storage import GameStorage
+    # 6. Поддержка нескольких игр
     storage1 = GameStorage()
     storage2 = GameStorage()
-    assert storage1 is not storage2  # разные экземпляры
-    print("✅ Архитектура поддерживает несколько одновременных игр (хранилище не глобальное).")
+    assert storage1 is not storage2
+    print("✅ Архитектура поддерживает несколько одновременных игр.")
     
     # 7. Разделение на файлы
     import os
