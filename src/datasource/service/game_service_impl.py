@@ -26,3 +26,20 @@ class GameServiceImplWithRepo(GameServiceInterface):
 
     def is_game_over(self, game: Game) -> bool:
         return all(cell != 0 for row in game.board.matrix for cell in row)
+
+    def save_game_state(self, game: Game) -> None:
+        """Сохраняет текущее состояние игры в репозиторий."""
+        # Переводим domain-модель в datasource-модель через маппер
+        game_ds = self._mapper.domain_to_ds(game)
+        self._repo.save_game(game_ds)
+
+    def get_previous_board(self, game_id: str) -> GameBoard | None:
+        """
+        Загружает предыдущее состояние доски из репозитория.
+        Возвращает None, если игра ещё не начиналась (первый ход).
+        """
+        game_ds = self._repo.get_game(game_id)
+        if game_ds is None:
+            return None
+        # Переводим datasource-модель обратно в domain-модель
+        return self._mapper.ds_to_domain(game_ds).board
