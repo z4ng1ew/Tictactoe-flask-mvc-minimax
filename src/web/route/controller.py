@@ -9,7 +9,9 @@ from web.mapper.mapper import GameWebMapper
 # Импортируем web-модель для ответа
 from web.model.game_web import GameWeb
 # Импортируем os для работы с путями
+# Импортируем функцию проверки победителя
 import os
+from domain.service.impl import check_winner
 
 def create_game_controller(service: GameServiceInterface) -> Flask:
     """
@@ -25,7 +27,6 @@ def create_game_controller(service: GameServiceInterface) -> Flask:
     @app.route('/')
     def serve_frontend():
         """Отдаёт HTML-страницу для игры в браузере."""
-        # Путь к папке static: web/route/../../static = web/static/
         static_dir = os.path.join(os.path.dirname(__file__), '..', 'static')
         return send_from_directory(static_dir, 'index.html')
     
@@ -38,12 +39,13 @@ def create_game_controller(service: GameServiceInterface) -> Flask:
         return send_from_directory(static_dir, filename)
 
     # =========================================================
-    # 🎯 СУЩЕСТВУЮЩИЙ МАРШРУТ: API для ходов (не меняем!)
+    # 🎯 СУЩЕСТВУЮЩИЙ МАРШРУТ: API для ходов (ИСПРАВЛЕННАЯ ЛОГИКА)
     # =========================================================
     @app.route('/game/<string:game_id>', methods=['POST'])
     def handle_game_move(game_id: str):
         """
         Обработчик хода: принимает ход игрока, возвращает ход компьютера.
+        🔥 ПРАВИЛЬНЫЙ ПОРЯДОК: проверяем победу ПОСЛЕ КАЖДОГО хода.
         """
         data = request.get_json()
         
@@ -68,35 +70,55 @@ def create_game_controller(service: GameServiceInterface) -> Flask:
                 abort(400, description="Board validation failed: previous moves were modified")
         
         # =========================================================
-        # 🔥 ИСПРАВЛЕНИЕ: Проверка окончания игры ДО хода компьютера
+        # 🔥 ПРОВЕРКА ПОБЕДЫ ИГРОКА (сразу после его хода!)
         # =========================================================
-        # Проверяем, заполнена ли доска полностью
+        winner = check_winner(domain_game.board.matrix)
+        
+        if winner == 1:
+            # 🎉 ИГРОК ВЫИГРАЛ! Не делаем ход компьютера
+            service.save_game_state(domain_game)
+            web_game_output = GameWebMapper.domain_to_web(domain_game)
+            return jsonify(web_game_output.to_dict()), 200
+        
+        # Проверяем ничью после хода игрока
+        if service.is_game_over(domain_game):
+            # 🤝 НИЧЬЯ! Игра окончена
+            service.save_game_state(domain_game)
+            web_game_output = GameWebMapper.domain_to_web(domain_game)
+            return jsonify(web_game_output.to_dict()), 200
+        
+        # =========================================================
+        # 🔥 Ход компьютера (только если игра ПРОДОЛЖАЕТСЯ)
+        # =========================================================
+        next_move: Tuple[int, int] = service.get_next_move(domain_game)
+        
+        # Проверяем, не заполнена ли доска
         board_full = all(cell != 0 for row in domain_game.board.matrix for cell in row)
         
-        # Если доска НЕ заполнена — делаем ход компьютера
-        if not board_full:
-            # 4. Получаем следующий ход от алгоритма
-            next_move: Tuple[int, int] = service.get_next_move(domain_game)
-            
-            # Дополнительная защита: если алгоритм вернул занятую клетку или (-1,-1)
-            if next_move != (-1, -1):
-                r, c = next_move
-                # Делаем ход только если клетка действительно свободна
-                if domain_game.board.matrix[r][c] == 0:
-                    domain_game.board.matrix[r][c] = 2  # 2 = компьютер
-        # Если доска заполнена — пропускаем ход компьютера, игра окончена
+        if not board_full and next_move != (-1, -1):
+            r, c = next_move
+            # Делаем ход только если клетка действительно свободна
+            if domain_game.board.matrix[r][c] == 0:
+                domain_game.board.matrix[r][c] = 2  # 2 = компьютер
+                
+                # 🔥 Проверяем победу КОМПЬЮТЕРА после его хода
+                winner = check_winner(domain_game.board.matrix)
+                if winner == 2:
+                    # 😔 КОМПЬЮТЕР ВЫИГРАЛ
+                    service.save_game_state(domain_game)
+                    web_game_output = GameWebMapper.domain_to_web(domain_game)
+                    return jsonify(web_game_output.to_dict()), 200
         
-        # 6. Проверяем окончание игры (для логики, но ответ всё равно вернём)
+        # Проверяем ничью после хода компьютера
         if service.is_game_over(domain_game):
-            pass
+            # 🤝 НИЧЬЯ
+            service.save_game_state(domain_game)
+            web_game_output = GameWebMapper.domain_to_web(domain_game)
+            return jsonify(web_game_output.to_dict()), 200
         
-        # 🔥 Сохраняем обновлённое состояние
+        # Игра продолжается — сохраняем и возвращаем
         service.save_game_state(domain_game)
-        
-        # 7. Переводим результат обратно в web-модель
         web_game_output = GameWebMapper.domain_to_web(domain_game)
-        
-        # 8. Возвращаем JSON-ответ
         return jsonify(web_game_output.to_dict()), 200
 
     return app
