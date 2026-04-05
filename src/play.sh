@@ -1,15 +1,16 @@
 #!/bin/bash
-# play.sh — клиент для игры в крестики-нолики
+# play.sh — клиент для игры в крестики-нолики с железобетонной проверкой победы
 # Запуск: ./play.sh [UUID]
 
 BASE_URL="http://127.0.0.1:5000"
 GAME_ID="${1:-$(python3 -c 'import uuid; print(uuid.uuid4())')}"
 
-# Цвета (используем printf для надёжности)
+# Цвета
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # сброс
+BLUE='\033[0;34m'
+NC='\033[0m'
 
 echo -e "${YELLOW}🎮 Крестики-Нолики${NC}"
 echo "Игра ID: $GAME_ID"
@@ -20,6 +21,7 @@ echo -e "Легенда: ${GREEN}1 = ты (X)${NC}, ${RED}2 = комп (O)${NC},
 echo "=================================================="
 
 CURRENT_MATRIX='[[0,0,0],[0,0,0],[0,0,0]]'
+GAME_OVER=false
 
 # Функция печати доски
 print_board() {
@@ -28,23 +30,46 @@ print_board() {
     echo "    0   1   2"
     echo "  -----------"
     
-    # Используем heredoc для правильной интерпретации цветов
-    python3 << EOF
+    python3 -c "
 import json
-m = json.loads('''$matrix''')
+m = json.loads('$matrix')
 for i, row in enumerate(m):
     line = []
     for cell in row:
-        if cell == 0:
-            line.append(' . ')
-        elif cell == 1:
-            line.append('$GREEN X $NC')
-        else:
-            line.append('$RED O $NC')
+        if cell == 0: line.append(' . ')
+        elif cell == 1: line.append('$GREEN X $NC')
+        else: line.append('$RED O $NC')
     print(f'{i} |' + '|'.join(line) + '|')
     print('  -----------')
-EOF
+"
     echo ""
+}
+
+# 🔥 НАДЁЖНАЯ проверка победителя
+check_winner() {
+    python3 -c "
+import json, sys
+m = json.loads('$1')
+lines = [
+    [(0,0),(0,1),(0,2)], [(1,0),(1,1),(1,2)], [(2,0),(2,1),(2,2)],
+    [(0,0),(1,0),(2,0)], [(0,1),(1,1),(2,1)], [(0,2),(1,2),(2,2)],
+    [(0,0),(1,1),(2,2)], [(0,2),(1,1),(2,0)]
+]
+for l in lines:
+    c = [m[r][c] for r, c in l]
+    if c[0] != 0 and c[0] == c[1] == c[2]:
+        print(c[0]); sys.exit()
+print(0)
+" 2>/dev/null
+}
+
+# 🔥 НАДЁЖНАЯ проверка ничьей
+check_draw() {
+    python3 -c "
+import json
+m = json.loads('$1')
+print('YES' if all(cell != 0 for row in m for cell in row) else 'NO')
+" 2>/dev/null
 }
 
 # Функция отправки хода
@@ -92,7 +117,7 @@ except Exception as e:
         return 1
     fi
     
-    # Обновляем матрицу из ответа
+    # Обновляем матрицу из ответа сервера
     CURRENT_MATRIX=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['board']['matrix']))" 2>/dev/null)
     
     if [[ -z "$CURRENT_MATRIX" ]]; then
@@ -103,11 +128,26 @@ except Exception as e:
     # Показываем обновлённую доску
     print_board "$CURRENT_MATRIX"
     
-    # Проверка на окончание игры (нет ли нулей)
-    EMPTY=$(echo "$CURRENT_MATRIX" | python3 -c "import sys,json; m=json.load(sys.stdin); print('YES' if any(0 in row for row in m) else 'NO')" 2>/dev/null)
-    if [[ "$EMPTY" == "NO" ]]; then
-        echo -e "${YELLOW}🏁 Игра окончена! Поле заполнено.${NC}"
-        echo "Начни новую: ./play.sh"
+    # 🔥 ПРОВЕРКА РЕЗУЛЬТАТА (с очисткой от переносов строк)
+    WINNER=$(check_winner "$CURRENT_MATRIX" | tr -d '[:space:]')
+    
+    if [[ "$WINNER" == "1" ]]; then
+        echo -e "${GREEN}🎉 ПОБЕДА! Ты выиграл!${NC}"
+        echo "Поздравляем! 🏆"
+        GAME_OVER=true
+        return 2
+    elif [[ "$WINNER" == "2" ]]; then
+        echo -e "${RED}😔 Компьютер выиграл.${NC}"
+        echo "Попробуй ещё раз! 🎮"
+        GAME_OVER=true
+        return 2
+    fi
+    
+    # Если нет победителя — проверяем ничью
+    DRAW=$(check_draw "$CURRENT_MATRIX" | tr -d '[:space:]')
+    if [[ "$DRAW" == "YES" ]]; then
+        echo -e "${YELLOW}🤝 Ничья! Поле заполнено.${NC}"
+        GAME_OVER=true
         return 2
     fi
     
@@ -119,6 +159,12 @@ print_board "$CURRENT_MATRIX"
 
 # Главный цикл
 while true; do
+    if [[ "$GAME_OVER" == "true" ]]; then
+        echo ""
+        echo "Начни новую: ./play.sh"
+        break
+    fi
+    
     read -p "Твой ход (row col): " input
     
     if [[ "$input" == "quit" || "$input" == "exit" || "$input" == "q" ]]; then
@@ -129,21 +175,17 @@ while true; do
         continue
     fi
     
-    # Парсим ввод
     read row col <<< "$input"
     
-    # Валидация
     if ! [[ "$row" =~ ^[0-2]$ && "$col" =~ ^[0-2]$ ]]; then
         echo -e "${RED}❌ Вводи числа 0-2. Пример: '0 1'${NC}"
         continue
     fi
     
-    # Делаем ход
     make_move "$row" "$col"
     result=$?
     
     if [[ $result -eq 2 ]]; then
-        break  # Игра окончена
+        break
     fi
-    # Если результат 1 (ошибка) — просто продолжаем цикл, не выходим
 done

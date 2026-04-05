@@ -67,13 +67,26 @@ def create_game_controller(service: GameServiceInterface) -> Flask:
             if not service.validate_board(domain_game, previous_board):
                 abort(400, description="Board validation failed: previous moves were modified")
         
-        # 4. Получаем следующий ход от алгоритма
-        next_move: Tuple[int, int] = service.get_next_move(domain_game)
+        # =========================================================
+        # 🔥 ИСПРАВЛЕНИЕ: Проверка окончания игры ДО хода компьютера
+        # =========================================================
+        # Проверяем, заполнена ли доска полностью
+        board_full = all(cell != 0 for row in domain_game.board.matrix for cell in row)
         
-        # 5. Применяем ход компьютера
-        domain_game.board.matrix[next_move[0]][next_move[1]] = 2
+        # Если доска НЕ заполнена — делаем ход компьютера
+        if not board_full:
+            # 4. Получаем следующий ход от алгоритма
+            next_move: Tuple[int, int] = service.get_next_move(domain_game)
+            
+            # Дополнительная защита: если алгоритм вернул занятую клетку или (-1,-1)
+            if next_move != (-1, -1):
+                r, c = next_move
+                # Делаем ход только если клетка действительно свободна
+                if domain_game.board.matrix[r][c] == 0:
+                    domain_game.board.matrix[r][c] = 2  # 2 = компьютер
+        # Если доска заполнена — пропускаем ход компьютера, игра окончена
         
-        # 6. Проверяем окончание игры
+        # 6. Проверяем окончание игры (для логики, но ответ всё равно вернём)
         if service.is_game_over(domain_game):
             pass
         
